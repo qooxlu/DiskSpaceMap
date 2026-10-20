@@ -1,0 +1,34 @@
+[package]
+name = "disk-space-map"
+version = "0.1.9"
+edition = "2024"
+license = "MIT"
+
+[[bin]]
+name = "DiskSpaceMap"
+path = "src/main.rs"
+
+[dependencies]
+eframe = { version = "0.37.0", default-features = false, features = ["glow", "default_fonts"] }
+parking_lot = "0.12.5"
+rayon = "1.12.0"
+rfd = "0.17.2"
+trash = "5.2.9"
+windows = { version = "0.62.2", features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
+
+[profile.dev]
+opt-level = 1
+
+[build-dependencies]
+winresource = "0.1.34"

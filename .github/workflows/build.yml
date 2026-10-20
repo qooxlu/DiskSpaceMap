@@ -1,0 +1,79 @@
+name: Build and release (Windows)
+
+# Every push and PR is built and tested. On a push to master/main, a GitHub Release
+# `v<version>` is created automatically when the version in Cargo.toml has no release yet,
+# so bumping `version` in Cargo.toml is all it takes to publish a new release.
+# Running the workflow manually on main rebuilds the current version's release asset.
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write # create tags and releases
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2.9.2
+
+      - name: Clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: Test
+        run: cargo test --locked
+
+      - name: Build release
+        run: cargo build --release --locked
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: DiskSpaceMap-windows-x64
+          path: target/release/DiskSpaceMap.exe
+
+      # Push: create release v<version> if it doesn't exist yet, otherwise do nothing.
+      # Manual run (workflow_dispatch): if the release exists, rebuild its asset in place —
+      # upload the exe (overwriting) and remove every other asset.
+      - name: Publish GitHub Release
+        if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          $version = (cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).packages[0].version
+          $tag = "v$version"
+          $exe = "DiskSpaceMap-$tag-windows-x64.exe"
+          Copy-Item target/release/DiskSpaceMap.exe $exe
+
+          gh release view $tag *> $null
+          $exists = $LASTEXITCODE -eq 0
+          $global:LASTEXITCODE = 0
+
+          if (-not $exists) {
+            gh release create $tag $exe --target "${{ github.sha }}" --title $tag --generate-notes
+          } elseif ("${{ github.event_name }}" -eq 'workflow_dispatch') {
+            gh release upload $tag $exe --clobber
+            gh release view $tag --json assets --jq '.assets[].name' |
+              Where-Object { $_ -and $_ -ne $exe } |
+              ForEach-Object { gh release delete-asset $tag $_ --yes }
+          } else {
+            "Release $tag already exists, skipping."
+          }
